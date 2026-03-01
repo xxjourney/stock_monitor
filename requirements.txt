@@ -1,0 +1,6 @@
+FinMind
+pandas
+line-bot-sdk
+Flask
+python-dotenv
+tqdm
