@@ -1,0 +1,6 @@
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+Warning: Permanently added '[a.pinggy.io]:443' (RSA) to the list of known hosts.
+You are not authenticated.
+Your tunnel will expire in 60 minutes. Upgrade to Pinggy Pro to get unrestricted tunnels. https://dashboard.pinggy.io
+http://vczla-101-12-158-31.a.free.pinggy.link
+https://vczla-101-12-158-31.a.free.pinggy.link

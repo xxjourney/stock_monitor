@@ -21,10 +21,19 @@ watchlist = set(["2330", "2303"])
 @app.route("/callback", methods=['POST'])
 def callback():
     # get X-Line-Signature header value
-    signature = request.headers['X-Line-Signature']
+    signature = request.headers.get('X-Line-Signature')
+    if not signature:
+        app.logger.error("Missing X-Line-Signature header")
+        abort(400)
 
     # get request body as text
     body = request.get_data(as_text=True)
+    
+    # Quick fix for Line verification timeout: 
+    # If the body is empty or just a verification check, return OK immediately.
+    if not body or body == '{}':
+        return 'OK'
+
     app.logger.info("Request body: " + body)
 
     # handle webhook body
@@ -95,4 +104,4 @@ def handle_message(event):
         )
 
 if __name__ == "__main__":
-    app.run(port=8080, debug=True)
+    app.run(host='localhost', port=8080, debug=False)

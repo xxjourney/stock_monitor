@@ -1,0 +1,4 @@
+[32mForwarding HTTP traffic from https://e31485e81dec9dc5-101-12-158-31.serveousercontent.com
+[0mConnection to serveo.net closed.
+tcsetattr: Bad file descriptor
+tcsetattr: Bad file descriptor
