@@ -1,6 +1,25 @@
 import pandas as pd
 from FinMind.data import DataLoader
 import datetime
+import json
+import os
+
+def load_watchlist(group_name=None):
+    path = os.path.join(os.path.dirname(__file__), 'watchlist.json')
+    if not os.path.exists(path):
+        return []
+    
+    with open(path, 'r') as f:
+        data = json.load(f)
+    
+    if group_name:
+        return data.get(group_name, [])
+    
+    # Return all unique stocks across all groups
+    all_stocks = set()
+    for stocks in data.values():
+        all_stocks.update(stocks)
+    return sorted(list(all_stocks))
 
 def get_stock_data(stock_id):
     api = DataLoader()

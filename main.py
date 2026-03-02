@@ -5,7 +5,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from dotenv import load_dotenv
-from stock_data import check_conditions
+from stock_data import check_conditions, load_watchlist
 
 load_dotenv()
 
@@ -15,8 +15,9 @@ app = Flask(__name__)
 configuration = Configuration(access_token=os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', ''))
 handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', ''))
 
-# Simple in-memory watchlist. In a real app, use a database like SQLite or PostgreSQL.
-watchlist = set(["2330", "2303"]) 
+# Initialize watchlist from watchlist.json
+initial_stocks = load_watchlist()
+watchlist = set(initial_stocks)
 
 @app.route("/callback", methods=['POST'])
 def callback():

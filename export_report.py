@@ -1,15 +1,34 @@
 import pandas as pd
-from stock_data import get_stock_data
+from stock_data import get_stock_data, load_watchlist
 import time
 from datetime import datetime
+import sys
 
-stock_list = [
-    '6691', '4542', '6683', '2360', '1560', '7769', '5434', '6196', '6139', '2467', '6788', '6187', '2404', '8028', '6667', '3551', '3010', '3583', '3402', '6640', '3374',
-    '6207', '2338', '5443', '3219', '4764', '1717', '1711', '4768', '4722', '1809', '1727', '4755', '1773', '1721'
-]
+# Load stocks from watchlist.json
+# Usage: python export_report.py [group_name]
+group_name = sys.argv[1] if len(sys.argv) > 1 else None
+stock_list = load_watchlist(group_name)
+
+# Create a mapping of stock_id -> list of groups for the CSV
+import json
+import os
+watchlist_path = os.path.join(os.path.dirname(__file__), 'watchlist.json')
+with open(watchlist_path, 'r') as f:
+    full_watchlist = json.load(f)
+
+stock_to_groups = {}
+for g_name, s_ids in full_watchlist.items():
+    for sid in s_ids:
+        if sid not in stock_to_groups:
+            stock_to_groups[sid] = []
+        stock_to_groups[sid].append(g_name)
+
+if not stock_list:
+    print(f"No stocks found for group: {group_name if group_name else 'ALL'}")
+    sys.exit(1)
 
 results = []
-filename = f"stock_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+filename = f"stock_report_{group_name + '_' if group_name else ''}{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
 print(f"Exporting data for {len(stock_list)} stocks to {filename}...")
 
@@ -26,6 +45,7 @@ for stock_id in stock_list:
             
             data = {
                 'Stock_ID': stock_id,
+                'Groups': ", ".join(stock_to_groups.get(stock_id, [])),
                 'Price': last_row['close'],
                 'K_Value': round(last_row['K'], 2),
                 'D_Value': round(last_row['D'], 2),
