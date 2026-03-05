@@ -17,7 +17,13 @@ def get_api():
         token = os.environ.get('FINMIND_API_TOKEN', '')
         _api_instance = DataLoader()
         if token:
-            _api_instance.login_by_token(api_token=token)
+            try:
+                _api_instance.login_by_token(api_token=token)
+                print(f"✅ FinMind API initialized with token: {token[:4]}...{token[-4:]}")
+            except Exception as e:
+                print(f"⚠️ Failed to login with token, falling back to guest mode: {e}")
+        else:
+            print("ℹ️ FinMind API initialized in guest mode (no token found in .env).")
     return _api_instance
 
 def load_watchlist(group_name=None):
