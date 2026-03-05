@@ -3,6 +3,22 @@ from FinMind.data import DataLoader
 import datetime
 import json
 import os
+import time
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Global DataLoader instance with token support
+_api_instance = None
+
+def get_api():
+    global _api_instance
+    if _api_instance is None:
+        token = os.environ.get('FINMIND_API_TOKEN', '')
+        _api_instance = DataLoader()
+        if token:
+            _api_instance.login_by_token(api_token=token)
+    return _api_instance
 
 def load_watchlist(group_name=None):
     path = os.path.join(os.path.dirname(__file__), 'watchlist.json')
@@ -21,68 +37,106 @@ def load_watchlist(group_name=None):
         all_stocks.update(stocks)
     return sorted(list(all_stocks))
 
-def get_stock_data(stock_id):
-    api = DataLoader()
+def get_stock_data(stock_id, force_refresh=False):
+    api = get_api()
     
+    # 0. Check Cache
+    now = datetime.datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    cache_dir = os.path.join(os.path.dirname(__file__), 'cache')
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+        
+    cache_file = os.path.join(cache_dir, f"{stock_id}_{today_str}.csv")
+    
+    # Smart Cache Logic:
+    # Use cache only if:
+    # 1. Not forced to refresh
+    # 2. File exists for TODAY
+    # 3. If it's after 15:00 (market data settled), the cache must also have been created after 15:00
+    if not force_refresh and os.path.exists(cache_file):
+        file_mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
+        market_settle_time = now.replace(hour=15, minute=0, second=0, microsecond=0)
+        
+        # If it's currently after 15:00, but the file was saved before 15:00, it might be missing today's final data
+        if now > market_settle_time and file_mod_time < market_settle_time:
+            pass # Refresh needed
+        else:
+            return pd.read_csv(cache_file)
+
     # Get last 60 days to ensure enough data for KD smoothing
     end_date = datetime.date.today()
     start_date = end_date - datetime.timedelta(days=60)
     
-    # 1. Fetch Price
-    df_price = api.taiwan_stock_daily(
-        stock_id=stock_id,
-        start_date=start_date.strftime("%Y-%m-%d"),
-        end_date=end_date.strftime("%Y-%m-%d")
-    )
-    if df_price.empty:
+    try:
+        # 1. Fetch Price
+        df_price = api.taiwan_stock_daily(
+            stock_id=stock_id,
+            start_date=start_date.strftime("%Y-%m-%d"),
+            end_date=end_date.strftime("%Y-%m-%d")
+        )
+        # Small delay between requests to stay under limit
+        time.sleep(1.0) 
+        
+        if df_price.empty:
+            return None
+            
+        # 2. Fetch Institutional Data (Foreign Investors)
+        df_inst = api.taiwan_stock_institutional_investors(
+            stock_id=stock_id,
+            start_date=start_date.strftime("%Y-%m-%d"),
+            end_date=end_date.strftime("%Y-%m-%d")
+        )
+        time.sleep(1.0)
+
+        df_foreign = pd.DataFrame()
+        if not df_inst.empty:
+            df_foreign = df_inst[df_inst['name'] == 'Foreign_Investor'].copy()
+            df_foreign['net_buy'] = df_foreign['buy'] - df_foreign['sell']
+            df_foreign = df_foreign[['date', 'buy', 'sell', 'net_buy']]
+            df_foreign.columns = ['date', 'foreign_buy', 'foreign_sell', 'foreign_net_buy']
+            
+        # 3. Calculate KD (standard 9 days)
+        n = 9
+        df_price['low_n'] = df_price['min'].rolling(window=n).min()
+        df_price['high_n'] = df_price['max'].rolling(window=n).max()
+        df_price['rsv'] = (df_price['close'] - df_price['low_n']) / (df_price['high_n'] - df_price['low_n']) * 100
+        
+        # Fill NaN RSV with 50 (standard practice)
+        df_price['rsv'] = df_price['rsv'].fillna(50)
+        
+        k = [50.0]
+        d = [50.0]
+        
+        for i in range(1, len(df_price)):
+            current_k = (2/3) * k[-1] + (1/3) * df_price['rsv'].iloc[i]
+            current_d = (2/3) * d[-1] + (1/3) * current_k
+            k.append(current_k)
+            d.append(current_d)
+            
+        df_price['K'] = k
+        df_price['D'] = d
+        
+        # 4. Merge Price and Institutional Data
+        if not df_foreign.empty:
+            final_df = pd.merge(df_price, df_foreign, on='date', how='left')
+        else:
+            final_df = df_price
+            final_df['foreign_net_buy'] = 0
+            
+        # Fill missing foreign data with 0 (days without institutional trading)
+        final_df['foreign_net_buy'] = final_df['foreign_net_buy'].fillna(0)
+        
+        # Save to Cache
+        final_df.to_csv(cache_file, index=False)
+        
+        return final_df
+    except Exception as e:
+        print(f"Error fetching data for {stock_id}: {str(e)}")
+        # If API limit hit, we might want to sleep longer or raise it
+        if "too many requests" in str(e).lower():
+            time.sleep(30) # Backoff
         return None
-        
-    # 2. Fetch Institutional Data (Foreign Investors)
-    df_inst = api.taiwan_stock_institutional_investors(
-        stock_id=stock_id,
-        start_date=start_date.strftime("%Y-%m-%d"),
-        end_date=end_date.strftime("%Y-%m-%d")
-    )
-    
-    df_foreign = pd.DataFrame()
-    if not df_inst.empty:
-        df_foreign = df_inst[df_inst['name'] == 'Foreign_Investor'].copy()
-        df_foreign['net_buy'] = df_foreign['buy'] - df_foreign['sell']
-        df_foreign = df_foreign[['date', 'buy', 'sell', 'net_buy']]
-        df_foreign.columns = ['date', 'foreign_buy', 'foreign_sell', 'foreign_net_buy']
-        
-    # 3. Calculate KD (standard 9 days)
-    n = 9
-    df_price['low_n'] = df_price['min'].rolling(window=n).min()
-    df_price['high_n'] = df_price['max'].rolling(window=n).max()
-    df_price['rsv'] = (df_price['close'] - df_price['low_n']) / (df_price['high_n'] - df_price['low_n']) * 100
-    
-    # Fill NaN RSV with 50 (standard practice)
-    df_price['rsv'] = df_price['rsv'].fillna(50)
-    
-    k = [50.0]
-    d = [50.0]
-    
-    for i in range(1, len(df_price)):
-        current_k = (2/3) * k[-1] + (1/3) * df_price['rsv'].iloc[i]
-        current_d = (2/3) * d[-1] + (1/3) * current_k
-        k.append(current_k)
-        d.append(current_d)
-        
-    df_price['K'] = k
-    df_price['D'] = d
-    
-    # 4. Merge Price and Institutional Data
-    if not df_foreign.empty:
-        final_df = pd.merge(df_price, df_foreign, on='date', how='left')
-    else:
-        final_df = df_price
-        final_df['foreign_net_buy'] = 0
-        
-    # Fill missing foreign data with 0 (days without institutional trading)
-    final_df['foreign_net_buy'] = final_df['foreign_net_buy'].fillna(0)
-    
-    return final_df
 
 def check_conditions(stock_id):
     df = get_stock_data(stock_id)

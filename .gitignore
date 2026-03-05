@@ -1,7 +1,11 @@
 # Environments
 .env
 .venv/
+venv/
 __pycache__/
 
 # Line bot testing
 *.sqlite3
+
+# Cache
+cache/

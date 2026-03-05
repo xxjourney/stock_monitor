@@ -28,7 +28,7 @@ if not stock_list:
     sys.exit(1)
 
 results = []
-desktop_path = os.path.expanduser("~/Desktop")
+desktop_path = os.path.expanduser("./")
 base_filename = f"stock_report_{group_name + '_' if group_name else ''}{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 filename = os.path.join(desktop_path, base_filename)
 
