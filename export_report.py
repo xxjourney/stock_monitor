@@ -40,6 +40,10 @@ for stock_id in stock_list:
         if df is not None and not df.empty:
             last_3 = df.tail(3)
             last_row = df.iloc[-1]
+            prev_row = df.iloc[-2]
+            
+            # Detect MACD Golden Cross
+            macd_cross = "Yes" if (prev_row['macd'] <= prev_row['macd_signal'] and last_row['macd'] > last_row['macd_signal']) else "No"
             
             # Get individual values for last 3 days
             foreign_values = [int(row['foreign_net_buy']) for _, row in last_3.iterrows()]
@@ -51,6 +55,9 @@ for stock_id in stock_list:
                 'Price': last_row['close'],
                 'K_Value': round(last_row['K'], 2),
                 'D_Value': round(last_row['D'], 2),
+                'MACD': round(last_row['macd'], 3),
+                'MACD_Signal': round(last_row['macd_signal'], 3),
+                'MACD_Golden_Cross': macd_cross
             }
             
             for i, (date, val) in enumerate(zip(dates, foreign_values)):

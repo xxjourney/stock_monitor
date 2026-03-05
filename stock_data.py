@@ -70,9 +70,9 @@ def get_stock_data(stock_id, force_refresh=False):
         else:
             return pd.read_csv(cache_file)
 
-    # Get last 60 days to ensure enough data for KD smoothing
+    # Get last 100 days to ensure enough data for KD and MACD smoothing
     end_date = datetime.date.today()
-    start_date = end_date - datetime.timedelta(days=60)
+    start_date = end_date - datetime.timedelta(days=100)
     
     try:
         # 1. Fetch Price
@@ -122,8 +122,15 @@ def get_stock_data(stock_id, force_refresh=False):
             
         df_price['K'] = k
         df_price['D'] = d
+
+        # 4. Calculate MACD
+        # Fast=12, Slow=26, Signal=9
+        df_price['ema12'] = df_price['close'].ewm(span=12, adjust=False).mean()
+        df_price['ema26'] = df_price['close'].ewm(span=26, adjust=False).mean()
+        df_price['macd'] = df_price['ema12'] - df_price['ema26']
+        df_price['macd_signal'] = df_price['macd'].ewm(span=9, adjust=False).mean()
         
-        # 4. Merge Price and Institutional Data
+        # 5. Merge Price and Institutional Data
         if not df_foreign.empty:
             final_df = pd.merge(df_price, df_foreign, on='date', how='left')
         else:
@@ -146,35 +153,41 @@ def get_stock_data(stock_id, force_refresh=False):
 
 def check_conditions(stock_id):
     df = get_stock_data(stock_id)
-    if df is None or len(df) < 4:
+    if df is None or len(df) < 30: # Need more data for MACD stability
         return False, f"Not enough data for {stock_id}"
         
-    # Condition 1: K crosses 20 from low to high
-    # Previous K <= 20, Current K > 20
     last_row = df.iloc[-1]
     prev_row = df.iloc[-2]
     
+    # Condition 1: K crosses 20 from low to high
     k_cross_20 = prev_row['K'] <= 20 and last_row['K'] > 20
     
     # Condition 2: Foreign investors net buy for 3 consecutive days
-    # Last 3 rows including today
     last_3_days = df.tail(3)
     foreign_buy_3_days = (last_3_days['foreign_net_buy'] > 0).all()
+
+    # Condition 3: MACD Golden Cross
+    macd_golden_cross = prev_row['macd'] <= prev_row['macd_signal'] and last_row['macd'] > last_row['macd_signal']
     
+    alerts = []
     if k_cross_20 and foreign_buy_3_days:
+        alerts.append("🔥 Advanced Filter: K > 20 Cross + 3 Days Foreign Net Buy")
+    
+    if macd_golden_cross:
+        alerts.append("✨ MACD Golden Cross: MACD line crossed above Signal line")
+
+    if alerts:
         msg = (
-            f"🟢 Stock {stock_id} Alert!\n"
+            f"🔔 Stock {stock_id} Signal!\n"
             f"Date: {last_row['date']}\n"
-            f"K Value crossed 20: {prev_row['K']:.2f} -> {last_row['K']:.2f}\n"
-            f"Foreign Net Buy (last 3 days):\n"
-            f"1. {last_3_days.iloc[0]['date']}: {last_3_days.iloc[0]['foreign_net_buy']}\n"
-            f"2. {last_3_days.iloc[1]['date']}: {last_3_days.iloc[1]['foreign_net_buy']}\n"
-            f"3. {last_3_days.iloc[2]['date']}: {last_3_days.iloc[2]['foreign_net_buy']}"
+            f"Price: {last_row['close']}\n"
+            f"K Value: {last_row['K']:.2f}\n"
+            f"MACD: {last_row['macd']:.2f}, Signal: {last_row['macd_signal']:.2f}\n\n"
+            "Signals:\n" + "\n".join(alerts)
         )
         return True, msg
         
-    # For testing, we can print the current status if conditions are not met
-    return False, f"Stock {stock_id} - Current K: {last_row['K']:.2f}, Last Foreign Net Buy: {last_row['foreign_net_buy']}"
+    return False, f"Stock {stock_id} - K: {last_row['K']:.2f}, MACD: {last_row['macd']:.2f}, Signal: {last_row['macd_signal']:.2f}"
 
 if __name__ == "__main__":
     import sys
