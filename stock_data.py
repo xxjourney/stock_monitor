@@ -104,11 +104,16 @@ def get_stock_data(stock_id, force_refresh=False):
             df_foreign = df_foreign[['date', 'buy', 'sell', 'net_buy']]
             df_foreign.columns = ['date', 'foreign_buy', 'foreign_sell', 'foreign_net_buy']
             
-        # 3. Calculate KD (Stochastics) using pandas-ta
-        # Default: k=9, d=3, smooth_k=3
-        stoch = df_price.ta.stoch(high='max', low='min', close='close', k=9, d=3, smooth_k=3)
-        df_price['K'] = stoch['STOCHk_9_3_3']
-        df_price['D'] = stoch['STOCHd_9_3_3']
+        # 3. Calculate KD (Taiwan Standard: RSV + 2/3, 1/3 smoothing)
+        n = 9
+        df_price['low_n'] = df_price['min'].rolling(window=n).min()
+        df_price['high_n'] = df_price['max'].rolling(window=n).max()
+        df_price['rsv'] = ((df_price['close'] - df_price['low_n']) / (df_price['high_n'] - df_price['low_n']) * 100).fillna(50)
+        
+        # In Taiwan, K/D smoothing is typically: Current = (1/3)*RSV + (2/3)*Prev_K
+        # This is equivalent to an Exponential Moving Average with alpha=1/3 (com=2)
+        df_price['K'] = df_price['rsv'].ewm(com=2, adjust=False).mean()
+        df_price['D'] = df_price['K'].ewm(com=2, adjust=False).mean()
 
         # 4. Calculate MACD using pandas-ta
         # Fast=12, Slow=26, Signal=9
