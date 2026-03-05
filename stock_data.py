@@ -70,9 +70,10 @@ def get_stock_data(stock_id, force_refresh=False):
         else:
             return pd.read_csv(cache_file)
 
-    # Get last 100 days to ensure enough data for KD and MACD smoothing
+    # Get last 150 days to ensure at least 100+ trading days for KD and MACD smoothing
+    # (Accounts for weekends and long holidays like Chinese New Year)
     end_date = datetime.date.today()
-    start_date = end_date - datetime.timedelta(days=100)
+    start_date = end_date - datetime.timedelta(days=150)
     
     try:
         # 1. Fetch Price
