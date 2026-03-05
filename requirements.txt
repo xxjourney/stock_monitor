@@ -4,3 +4,4 @@ line-bot-sdk
 Flask
 python-dotenv
 tqdm
+pandas-ta

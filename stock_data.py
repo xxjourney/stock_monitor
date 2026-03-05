@@ -1,4 +1,5 @@
 import pandas as pd
+import pandas_ta as ta
 from FinMind.data import DataLoader
 import datetime
 import json
@@ -103,33 +104,17 @@ def get_stock_data(stock_id, force_refresh=False):
             df_foreign = df_foreign[['date', 'buy', 'sell', 'net_buy']]
             df_foreign.columns = ['date', 'foreign_buy', 'foreign_sell', 'foreign_net_buy']
             
-        # 3. Calculate KD (standard 9 days)
-        n = 9
-        df_price['low_n'] = df_price['min'].rolling(window=n).min()
-        df_price['high_n'] = df_price['max'].rolling(window=n).max()
-        df_price['rsv'] = (df_price['close'] - df_price['low_n']) / (df_price['high_n'] - df_price['low_n']) * 100
-        
-        # Fill NaN RSV with 50 (standard practice)
-        df_price['rsv'] = df_price['rsv'].fillna(50)
-        
-        k = [50.0]
-        d = [50.0]
-        
-        for i in range(1, len(df_price)):
-            current_k = (2/3) * k[-1] + (1/3) * df_price['rsv'].iloc[i]
-            current_d = (2/3) * d[-1] + (1/3) * current_k
-            k.append(current_k)
-            d.append(current_d)
-            
-        df_price['K'] = k
-        df_price['D'] = d
+        # 3. Calculate KD (Stochastics) using pandas-ta
+        # Default: k=9, d=3, smooth_k=3
+        stoch = df_price.ta.stoch(high='max', low='min', close='close', k=9, d=3, smooth_k=3)
+        df_price['K'] = stoch['STOCHk_9_3_3']
+        df_price['D'] = stoch['STOCHd_9_3_3']
 
-        # 4. Calculate MACD
+        # 4. Calculate MACD using pandas-ta
         # Fast=12, Slow=26, Signal=9
-        df_price['ema12'] = df_price['close'].ewm(span=12, adjust=False).mean()
-        df_price['ema26'] = df_price['close'].ewm(span=26, adjust=False).mean()
-        df_price['macd'] = df_price['ema12'] - df_price['ema26']
-        df_price['macd_signal'] = df_price['macd'].ewm(span=9, adjust=False).mean()
+        macd = df_price.ta.macd(close='close', fast=12, slow=26, signal=9)
+        df_price['macd'] = macd['MACD_12_26_9']
+        df_price['macd_signal'] = macd['MACDs_12_26_9']
         
         # 5. Merge Price and Institutional Data
         if not df_foreign.empty:
