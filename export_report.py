@@ -3,10 +3,16 @@ from stock_data import get_stock_data, load_watchlist
 import time
 from datetime import datetime
 import sys
+import argparse
 
 # Load stocks from watchlist.json
-# Usage: python export_report.py [group_name]
-group_name = sys.argv[1] if len(sys.argv) > 1 else None
+# Usage: python export_report.py [group_name] [--force-refresh]
+parser = argparse.ArgumentParser()
+parser.add_argument('group_name', nargs='?', default=None)
+parser.add_argument('--force-refresh', '-f', action='store_true')
+args = parser.parse_args()
+group_name = args.group_name
+force_refresh = args.force_refresh
 stock_list = load_watchlist(group_name)
 
 # Create a mapping of stock_id -> list of groups for the CSV
@@ -36,7 +42,7 @@ print(f"Exporting data for {len(stock_list)} stocks to {filename}...")
 
 for stock_id in stock_list:
     try:
-        df = get_stock_data(stock_id)
+        df = get_stock_data(stock_id, force_refresh=force_refresh)
         if df is not None and not df.empty:
             last_3 = df.tail(3)
             last_row = df.iloc[-1]

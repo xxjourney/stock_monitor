@@ -91,11 +91,14 @@ def get_stock_data(stock_id, force_refresh=False):
             return None
 
         # 2. Load or Fetch Institutional Data (Foreign Investors)
-        # Institutional data is end-of-day only — safe to cache all day, no intraday updates
+        # Reuse inst cache only if its most recent date is today —
+        # meaning today's data is already included. No hardcoded time needed.
         df_foreign = pd.DataFrame()
         if not force_refresh and os.path.exists(inst_cache_file):
-            print(f"Using cached institutional data for {stock_id}")
-            df_foreign = pd.read_csv(inst_cache_file)
+            cached_inst = pd.read_csv(inst_cache_file)
+            if not cached_inst.empty and cached_inst['date'].max() >= today_str:
+                print(f"Using cached institutional data for {stock_id}")
+                df_foreign = cached_inst
         else:
             df_inst = api.taiwan_stock_institutional_investors(
                 stock_id=stock_id,
@@ -196,8 +199,15 @@ def check_conditions(stock_id):
 
 if __name__ == "__main__":
     import sys
-    stock_id = sys.argv[1] if len(sys.argv) > 1 else '2330'
-    print(f"Checking conditions for {stock_id}...")
-    is_met, msg = check_conditions(stock_id)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('stock_id', nargs='?', default='2330')
+    parser.add_argument('--force-refresh', '-f', action='store_true')
+    args = parser.parse_args()
+    if args.force_refresh:
+        print(f"Force refreshing data for {args.stock_id}...")
+        get_stock_data(args.stock_id, force_refresh=True)
+    print(f"Checking conditions for {args.stock_id}...")
+    is_met, msg = check_conditions(args.stock_id)
     print(f"Result: {is_met}")
     print(msg)
