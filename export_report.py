@@ -43,7 +43,9 @@ print(f"Exporting data for {len(stock_list)} stocks to {filename}...")
 for stock_id in stock_list:
     try:
         df = get_stock_data(stock_id, force_refresh=force_refresh)
-        if df is not None and not df.empty:
+        if df is None or df.empty:
+            print(f"⚠️  No data for {stock_id} (skipped)")
+        elif df is not None and not df.empty:
             last_3 = df.tail(3)
             last_row = df.iloc[-1]
             prev_row = df.iloc[-2]

@@ -88,6 +88,7 @@ def get_stock_data(stock_id, force_refresh=False):
         time.sleep(1.0)
 
         if df_price.empty:
+            print(f"⚠️  FinMind returned no price data for {stock_id}")
             return None
 
         # 2. Load or Fetch Institutional Data (Foreign Investors)
@@ -128,8 +129,15 @@ def get_stock_data(stock_id, force_refresh=False):
         # 4. Calculate MACD using pandas-ta
         # Fast=12, Slow=26, Signal=9
         macd = df_price.ta.macd(close='close', fast=12, slow=26, signal=9)
-        df_price['macd'] = macd['MACD_12_26_9']
-        df_price['macd_signal'] = macd['MACDs_12_26_9']
+        if macd is not None and 'MACD_12_26_9' in macd.columns:
+            df_price['macd'] = macd['MACD_12_26_9']
+            df_price['macd_signal'] = macd['MACDs_12_26_9']
+        else:
+            # Fallback: compute MACD manually with min_periods=1 so sparse data still produces values
+            ema12 = df_price['close'].ewm(span=12, min_periods=1, adjust=False).mean()
+            ema26 = df_price['close'].ewm(span=26, min_periods=1, adjust=False).mean()
+            df_price['macd'] = ema12 - ema26
+            df_price['macd_signal'] = df_price['macd'].ewm(span=9, min_periods=1, adjust=False).mean()
 
         # 5. Merge Price and Institutional Data
         if not df_foreign.empty:
