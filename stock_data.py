@@ -46,17 +46,18 @@ def load_watchlist(group_name=None):
 
 def get_stock_data(stock_id, force_refresh=False):
     api = get_api()
-    
+
     # 0. Check Cache
     now = datetime.datetime.now()
     today_str = now.strftime("%Y-%m-%d")
     cache_dir = os.path.join(os.path.dirname(__file__), 'cache')
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
-        
+
     cache_file = os.path.join(cache_dir, f"{stock_id}_{today_str}.csv")
-    
-    # Smart Cache Logic:
+    inst_cache_file = os.path.join(cache_dir, f"{stock_id}_{today_str}_inst.csv")
+
+    # Smart Cache Logic for merged data:
     # Use cache only if:
     # 1. Not forced to refresh
     # 2. File exists for TODAY
@@ -64,10 +65,10 @@ def get_stock_data(stock_id, force_refresh=False):
     if not force_refresh and os.path.exists(cache_file):
         file_mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
         market_settle_time = now.replace(hour=15, minute=0, second=0, microsecond=0)
-        
-        # If it's currently after 15:00, but the file was saved before 15:00, it might be missing today's final data
+
+        # If it's currently after 15:00, but the file was saved before 15:00, price data may be stale
         if now > market_settle_time and file_mod_time < market_settle_time:
-            pass # Refresh needed
+            pass # Price refresh needed; inst cache may still be reused below
         else:
             return pd.read_csv(cache_file)
 
@@ -75,7 +76,7 @@ def get_stock_data(stock_id, force_refresh=False):
     # This provides ~480+ trading days, which is the industry standard for precision
     end_date = datetime.date.today()
     start_date = end_date - datetime.timedelta(days=730)
-    
+
     try:
         # 1. Fetch Price
         df_price = api.taiwan_stock_daily(
@@ -84,32 +85,38 @@ def get_stock_data(stock_id, force_refresh=False):
             end_date=end_date.strftime("%Y-%m-%d")
         )
         # Small delay between requests to stay under limit
-        time.sleep(1.0) 
-        
-        if df_price.empty:
-            return None
-            
-        # 2. Fetch Institutional Data (Foreign Investors)
-        df_inst = api.taiwan_stock_institutional_investors(
-            stock_id=stock_id,
-            start_date=start_date.strftime("%Y-%m-%d"),
-            end_date=end_date.strftime("%Y-%m-%d")
-        )
         time.sleep(1.0)
 
+        if df_price.empty:
+            return None
+
+        # 2. Load or Fetch Institutional Data (Foreign Investors)
+        # Institutional data is end-of-day only — safe to cache all day, no intraday updates
         df_foreign = pd.DataFrame()
-        if not df_inst.empty:
-            df_foreign = df_inst[df_inst['name'] == 'Foreign_Investor'].copy()
-            df_foreign['net_buy'] = df_foreign['buy'] - df_foreign['sell']
-            df_foreign = df_foreign[['date', 'buy', 'sell', 'net_buy']]
-            df_foreign.columns = ['date', 'foreign_buy', 'foreign_sell', 'foreign_net_buy']
-            
+        if not force_refresh and os.path.exists(inst_cache_file):
+            print(f"Using cached institutional data for {stock_id}")
+            df_foreign = pd.read_csv(inst_cache_file)
+        else:
+            df_inst = api.taiwan_stock_institutional_investors(
+                stock_id=stock_id,
+                start_date=start_date.strftime("%Y-%m-%d"),
+                end_date=end_date.strftime("%Y-%m-%d")
+            )
+            time.sleep(1.0)
+
+            if not df_inst.empty:
+                df_foreign = df_inst[df_inst['name'] == 'Foreign_Investor'].copy()
+                df_foreign['net_buy'] = df_foreign['buy'] - df_foreign['sell']
+                df_foreign = df_foreign[['date', 'buy', 'sell', 'net_buy']]
+                df_foreign.columns = ['date', 'foreign_buy', 'foreign_sell', 'foreign_net_buy']
+                df_foreign.to_csv(inst_cache_file, index=False)
+
         # 3. Calculate KD (Taiwan Standard: RSV + 2/3, 1/3 smoothing)
         n = 9
         df_price['low_n'] = df_price['min'].rolling(window=n).min()
         df_price['high_n'] = df_price['max'].rolling(window=n).max()
         df_price['rsv'] = ((df_price['close'] - df_price['low_n']) / (df_price['high_n'] - df_price['low_n']) * 100).fillna(50)
-        
+
         # In Taiwan, K/D smoothing is typically: Current = (1/3)*RSV + (2/3)*Prev_K
         # This is equivalent to an Exponential Moving Average with alpha=1/3 (com=2)
         df_price['K'] = df_price['rsv'].ewm(com=2, adjust=False).mean()
@@ -120,26 +127,33 @@ def get_stock_data(stock_id, force_refresh=False):
         macd = df_price.ta.macd(close='close', fast=12, slow=26, signal=9)
         df_price['macd'] = macd['MACD_12_26_9']
         df_price['macd_signal'] = macd['MACDs_12_26_9']
-        
+
         # 5. Merge Price and Institutional Data
         if not df_foreign.empty:
             final_df = pd.merge(df_price, df_foreign, on='date', how='left')
         else:
             final_df = df_price
             final_df['foreign_net_buy'] = 0
-            
+
         # Fill missing foreign data with 0 (days without institutional trading)
         final_df['foreign_net_buy'] = final_df['foreign_net_buy'].fillna(0)
-        
+
         # Save to Cache
         final_df.to_csv(cache_file, index=False)
-        
+
         return final_df
     except Exception as e:
         print(f"Error fetching data for {stock_id}: {str(e)}")
-        # If API limit hit, we might want to sleep longer or raise it
+        # If API limit hit, back off before the caller retries other stocks
         if "too many requests" in str(e).lower():
-            time.sleep(30) # Backoff
+            time.sleep(30)
+        # Fall back to stale cache if available; resave to update mtime so this
+        # run counts as a valid post-15:00 fetch and won't trigger a retry loop.
+        if os.path.exists(cache_file):
+            print(f"Falling back to stale cache for {stock_id}")
+            stale_df = pd.read_csv(cache_file)
+            stale_df.to_csv(cache_file, index=False)  # Bump mtime to now
+            return stale_df
         return None
 
 def check_conditions(stock_id):
