@@ -17,7 +17,7 @@ A Line chatbot that monitors Taiwan stocks and sends notifications based on tech
 - **Two cache files per stock per day:**
   - `{stock_id}_{today}.csv` — merged price + institutional + indicators (smart 15:00 cache)
   - `{stock_id}_{today}_inst.csv` — institutional data only (cached all day, no intraday updates)
-- **Smart cache logic:** After 15:00 (market close), merged cache is bypassed if it was created before 15:00 (price may be stale). Institutional cache is always reused.
+- **Smart cache logic:** On weekdays (trading days), merged cache is bypassed after 15:00 if it was created before 15:00 (price may be stale). On weekends/non-trading days, cache is always reused — no new data arrives. Institutional cache is reused if its file was created today (mtime-based), avoiding false misses on weekends where `date.max()` in the data would be Friday.
 - **Stale fallback:** On API error, returns stale merged cache and bumps its mtime to prevent retry loops.
 
 ### FinMind API Rate Limiting

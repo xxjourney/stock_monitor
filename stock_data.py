@@ -61,13 +61,15 @@ def get_stock_data(stock_id, force_refresh=False):
     # Use cache only if:
     # 1. Not forced to refresh
     # 2. File exists for TODAY
-    # 3. If it's after 15:00 (market data settled), the cache must also have been created after 15:00
+    # 3. On a trading day (weekday), if it's after 15:00, cache must also be created after 15:00
+    #    On a non-trading day (weekend), always reuse cache — no new data will come in
     if not force_refresh and os.path.exists(cache_file):
         file_mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(cache_file))
         market_settle_time = now.replace(hour=15, minute=0, second=0, microsecond=0)
+        is_trading_day = now.weekday() < 5  # Mon=0 ... Fri=4
 
-        # If it's currently after 15:00, but the file was saved before 15:00, price data may be stale
-        if now > market_settle_time and file_mod_time < market_settle_time:
+        # Only bypass cache on weekdays after 15:00 if cache was created before 15:00
+        if is_trading_day and now > market_settle_time and file_mod_time < market_settle_time:
             pass # Price refresh needed; inst cache may still be reused below
         else:
             return pd.read_csv(cache_file)
@@ -96,10 +98,10 @@ def get_stock_data(stock_id, force_refresh=False):
         # meaning today's data is already included. No hardcoded time needed.
         df_foreign = pd.DataFrame()
         if not force_refresh and os.path.exists(inst_cache_file):
-            cached_inst = pd.read_csv(inst_cache_file)
-            if not cached_inst.empty and cached_inst['date'].max() >= today_str:
+            inst_mod_time = datetime.datetime.fromtimestamp(os.path.getmtime(inst_cache_file))
+            if inst_mod_time.date() == now.date():
                 print(f"Using cached institutional data for {stock_id}")
-                df_foreign = cached_inst
+                df_foreign = pd.read_csv(inst_cache_file)
         else:
             df_inst = api.taiwan_stock_institutional_investors(
                 stock_id=stock_id,
